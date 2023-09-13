@@ -3,6 +3,7 @@ package healthcheck
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -19,6 +20,12 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
+// BasicAuth basic auth for http checks
+type BasicAuth struct {
+	Username string
+	Password string
+}
+
 // HTTPHealthcheckConfiguration defines an HTTP healthcheck configuration
 type HTTPHealthcheckConfiguration struct {
 	Base        `json:",inline" yaml:",inline"`
@@ -32,6 +39,7 @@ type HTTPHealthcheckConfiguration struct {
 	Body       string            `json:"body,omitempty"`
 	Query      map[string]string `json:"query,omitempty"`
 	Headers    map[string]string `json:"headers,omitempty"`
+	BasicAuth  BasicAuth         `json:"basic-auth,omitempty"`
 	Protocol   Protocol          `json:"protocol"`
 	Path       string            `json:"path,omitempty"`
 	SourceIP   IP                `json:"source-ip,omitempty" yaml:"source-ip,omitempty"`
@@ -79,6 +87,10 @@ func (config *HTTPHealthcheckConfiguration) Validate() error {
 	if !((config.Key != "" && config.Cert != "") ||
 		(config.Key == "" && config.Cert == "")) {
 		return errors.New("Invalid certificates")
+	}
+	if (config.BasicAuth.Username == "" && config.BasicAuth.Password != "") ||
+		(config.BasicAuth.Username != "" && config.BasicAuth.Password == "") {
+		return errors.New("Invalid Basic Auth configuration")
 	}
 	return nil
 }
@@ -211,6 +223,9 @@ func (h *HTTPHealthcheck) Execute() error {
 	for k, v := range h.Config.Headers {
 		req.Header.Set(k, v)
 	}
+	if h.Config.BasicAuth != (BasicAuth{}) {
+		req.Header.Add("Authorization", "Basic "+basicAuth(h.Config.BasicAuth.Username, h.Config.BasicAuth.Password))
+	}
 	redirect := http.ErrUseLastResponse
 	if h.Config.Redirect {
 		redirect = nil
@@ -315,4 +330,9 @@ func (in *HTTPHealthcheckConfiguration) DeepCopy() *HTTPHealthcheckConfiguration
 	out := new(HTTPHealthcheckConfiguration)
 	in.DeepCopyInto(out)
 	return out
+}
+
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }
